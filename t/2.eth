@@ -1,0 +1,62 @@
+using LibUv as Uv in
+
+let dump_html data =
+  let file = open_out "tmp.html" in
+  write_to file data;
+  system "w3m -dump tmp.html";
+in
+
+
+let google_ips =
+  [ "216.58.207.36"
+  --, "216.239.34.10"
+  --, "216.239.36.10"
+  --, "216.239.32.10"
+  --, "216.239.38.10"
+  ]
+in
+google_ips |> List.iter (ip ->
+  Uv.tcp_connect (ip, 80) (fn {stream, err} ->
+    if err then printf "can't connect to ~w (~w)\n" ip err
+    else begin
+      print ("connected to " ++ ip);
+      let msg = String.cat
+        [ "GET / HTTP/1.1\r\n"
+        , "Host: www.google.com\r\n"
+        --, "User-Agent: curl/7.71.0\r\n"
+        , "User-Agent: your-mother\r\n"
+        , "Accept: */*\r\n"
+        , "\r\n"
+        ]
+      in
+      stream:write msg (fn {err} ->
+        if err then print ("error on write:", err)
+        else begin
+          stream:read (fn {acc, data, err} ->
+            if err then
+              if err is End_of_file then begin
+                String.cat acc
+                |> String.split \\r\n\r\n/
+                |> flip List.get 1
+                |> dump_html;
+                stream:shutdown (fn _ -> printf "connection closed\n") or ();
+              end else print ("error while reading:", err)
+            else begin
+              printf "received ~w bytes\n" (String.len data);
+              data :: acc
+            end
+          );
+          Uv.timer {
+            timeout = 2000
+          , cb = fn ->
+              printf "closing connection with ~d\n" ip;
+              stream:shutdown (fn _ -> printf "connection closed\n") or ();
+          };
+        end
+      )
+    end
+  )
+);
+
+print "exit main";
+

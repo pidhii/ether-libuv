@@ -1,0 +1,123 @@
+module =
+--------------------------------------------------------------------------------
+  let pub timer ({cb} as cfg) =
+  {.help|
+\e[1mUSAGE:\e[0m
+  timer {cb = function?, [repeat = number?], [timeout = number?], [acc = <any>]}
+
+\e[1mDESCRIPTION:\e[0m
+  Start a timer. Two modes are available: "repeat" and "one-shot". For the first
+  one, \e[4mrepeat\e[0m-value must be specified; in this case  a funcion  will  be  called
+  in each \e[4mrepeat\e[0m milliseconds, and stopped as soon \e[4mcb\e[0m returns \e[4mfalse\e[0m. When \e[4mrepeat\e[0m
+  is not specified, \e[4mcb\e[0m will be called only once, after \e[4mtimeout\e[0m milliseconds.
+
+\e[1mARGUMENTS:\e[0m
+  - \e[4mcb\e[0m: Callback to be called at the "tick". Can be either a  function of 0 or 1
+    arguments. For the second  case one  must specify  \e[4macc\e[0m. When \e[4mrepeat\e[0m value is
+    specified, each subsequent return of  the callback  will replace  a previous
+    \e[4macc\e[0m.
+
+  - \e[4mrepeat\e[0m (optional): Time in mulliseconds specifying  intervals  at  which  \e[4mcb\e[0m
+    will be called.
+
+  - \e[4mtimout\e[0m (optional, default = 0): Time offset in  milliseconds for  the  first
+    invocation of \e[4mcb\e[0m.
+
+  - \e[4macc\e[0m (optional): Initial value for the accumulator in  repeat-mode.  In  one-
+    shot-mode this value can still be specified: it will be passed to \e[4mcb\e[0m  during
+    the call.
+  |.help} -- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    let timeout = cfg.timeout or 0 in
+    let (cb, acc) = if let {acc} = cfg then (cb, acc) else (fn _ -> cb!, nil) in
+    if let {repeat} = cfg
+    then __create_timer timeout repeat cb acc
+    else __create_timer timeout 0 (acc -> cb acc; false) acc
+
+  let pub open_in path cb =
+    let flags = o_rdonly in
+    __open path flags 0 (fn file err -> cb {file, err})
+
+  let creat_mode = List.fold_left (lor) 0 [
+      s_irusr, s_iwusr, s_irgrp, s_iwgrp, s_iroth, s_iwoth
+    ]
+
+  let pub open_out path cb =
+    let flags = o_wronly lor o_creat lor o_trunc in
+    __open path flags creat_mode (fn file err -> cb {file, err})
+
+  let pub open_append path cb =
+    let flags = o_wronly lor o_creat lor o_append in
+    __open path flags creat_mode (fn file err -> cb {file, err})
+
+  let pub read file bufs rest =
+  {.help|
+\e[1mUSAGE:\e[0m
+  read <file> <buffer> [<offset>] <callback>
+
+\e[1mDESCRIPTION:\e[0m
+  Read contents of \e[4mfile\e[0m into supplied buffer(s).
+
+\e[1mARGUMENTS:\e[0m
+  - \e[4mfile\e[0m: File handle.
+
+  - \e[4mbuffer\e[0m: A string or a list of strings to be filled with the data. When  list
+    of strings is supplied,  upon successfull operation  they will be filled  in
+    sequence preserving the order of the list, i.e. first string is the first to
+    be filled, then the second, and so on. If number of bytest read is less than
+    the length  of the string  (or  the sum of lengths of strings in the  list).
+    Lengths of supplied strings  are  NOT  adjasted to fit the number  of  bytes
+    read. User should handle it on his own.
+
+  - \e[4moffset\e[0m (optional, default = 0): Offset from the beginning of the file.
+
+  - \e[4mcallback\e[0m: Callback to be called after operation was finished. It
+    will be applied to the following structure:
+                   {nread = number?, err = <error>}
+    where
+      nread -- number of bytes read;
+      err   -- in case of successfull completion is set to \`false\`; otherwise,
+               a string containing description of an error.
+  |.help}
+    let bufs = [bufs] if string? bufs else bufs in
+    if function? rest
+      then __fs_read file bufs 0 (fn nread err -> rest {nread, err})
+      else fn cb -> __fs_read file bufs rest (fn nread err -> cb {nread, err})
+
+
+  let pub tcp_connect host cb =
+    let (ip, port) =
+      if tuple? host then host
+      else
+        let [ip, port] = String.split \:/ host in
+        (ip, String.to_number port)
+    in
+    let cb' raw_stream err =
+      let stream =
+        { read = fn _ cb ->
+            let cb' acc data err = cb {acc, data, err} in
+            __read_start raw_stream cb' nil
+        , write = fn _ bufs cb ->
+            let cb' err = cb {err} in
+            let bufs = [bufs] if string? bufs else bufs in
+            __write raw_stream bufs cb';
+            nil
+        -- Should be called only once. Repetative calls will raise an exception.
+        , shutdown = fn _ cb ->
+            let cb' err = cb {err} in
+            __shutdown raw_stream cb'
+        }
+      in
+      cb {stream, err}
+    in
+    __tcp__connect ip port cb'
+
+
+  let pub promise f =
+  {.help|
+\e[1mUSAGE:\e[0m
+  promise ({resolve, refect} -> <any>) -> <result>
+  |.help}
+    __promise (p -> f {resolve = __resolve p, reject = __reject p})
+
+  let pub await = __await
+end

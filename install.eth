@@ -1,0 +1,25 @@
+
+let options =
+  [ {name = "debug", val = "debug", has_arg = false}
+  ]
+in
+let (opts, _) = CmdArg.get options command_line in
+
+let is_debug = List.assoc_opt "debug" opts in
+
+module =
+  let pub name = "libuv"
+  let pub main = "lib.so"
+  let pub files = ["lib.eth"]
+
+  let pub build! =
+    when is_debug then print "Building with debug-configuration";
+    let flags = if is_debug then "-Og -ggdb" else "-O3" in
+    let ether_flags = "`pkg-config ether --cflags`" in
+    system $ String.join " " [
+      "gcc", flags, "-shared -o lib.so -fpic", ether_flags, "-luv lib.c"
+    ]
+
+  let pub post_install! =
+    system "rm -rfv lib.so"
+end

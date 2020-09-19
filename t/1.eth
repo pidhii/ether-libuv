@@ -1,0 +1,36 @@
+
+using LibUv as Uv in
+open Libuv (await) in
+
+Uv.timer {
+  cb = i -> print_to stderr i; i + 1 if i < 5 else false
+, repeat = 1000
+, acc = 1
+};
+
+let promise = Uv.promise (fn {resolve, reject} ->
+  Uv.open_in "libs/libuv/test.eth" (fn {file, err} ->
+    print "opened file";
+    print ("\tfile:", file);
+    print ("\terr:", err);
+    unless err then
+      let buf = String.create 0x10 in
+      let rec reader offs acc {nread, err} =
+        --printf "\t\tread ~w\n" (String.sub buf (0..nread-1));
+        --printf "~d" (String.sub buf (0..nread-1));
+        let offs = offs + nread in
+        let acc = acc ++ String.sub buf (0..nread-1) in
+        if nread > 0
+          then Uv.read file buf offs (reader offs acc)
+          else resolve acc
+      in
+      Uv.read file buf (reader 0 "")
+  )
+)
+in
+
+print "exiting main";
+
+let text = await promise in
+print "text:";
+print text;
